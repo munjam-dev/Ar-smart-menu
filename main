@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>AR Hotel Menu - Real Surface Detection</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;600&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background: #0f172a;
+        }
+        
+        .serif {
+            font-family: 'Playfair Display', serif;
+        }
+        
+        #ar-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .pizza-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+        }
+        
+        .pizza-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 25px 50px -12px rgba(245, 158, 11, 0.25);
+        }
+        
+        .pizza-card.active {
+            border: 2px solid #f59e0b;
+            background: rgba(245, 158, 11, 0.1);
+        }
+        
+        .reticle {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border: 3px solid #f59e0b;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            display: none;
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.7; }
+        }
+        
+        .scanning-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(to right, transparent, #f59e0b, transparent);
+            animation: scan 2s linear infinite;
+            top: 50%;
+            pointer-events: none;
+        }
+        
+        @keyframes scan {
+            0% { transform: translateY(-100px); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translateY(100px); opacity: 0; }
+        }
+        
+        .loader {
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid #f59e0b;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        #ui-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        .interactive {
+            pointer-events: auto;
+        }
+        
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Canvas -->
+    <canvas id="ar-canvas"></canvas>
+    
+    <!-- Reticle for placement -->
+    <div id="reticle" class="reticle"></div>
+    
+    <!-- UI Layer -->
+    <div id="ui-layer">
+        
+        <!-- Start Screen -->
+        <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 interactive z-50">
+            <div class="text-center max-w-md px-6">
+                <div class="w-24 h-24 bg-gradient-to-br from-amber-500 to-orange-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-orange-500/30">
+                    <i class="fas fa-utensils text-4xl text-white"></i>
+                </div>
+                <h1 class="text-4xl font-bold serif mb-4 text-white">Grand Hotel AR</h1>
+                <p class="text-slate-400 mb-8 text-lg">Experience our menu in your space. See realistic 3D pizzas on your table before ordering.</p>
+                
+                <div class="space-y-4">
+                    <button onclick="startAR()" class="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-black font-bold py-4 px-8 rounded-2xl transition-all transform hover:scale-105 flex items-center justify-center gap-3 text-lg shadow-lg shadow-orange-500/25">
+                        <i class="fas fa-camera"></i>
+                        Start AR Experience
+                    </button>
+                    <p class="text-xs text-slate-500">Requires camera access • Works on iOS Safari & Android Chrome</p>
+                </div>
+                
+                <div class="mt-8 grid grid-cols-3 gap-4 text-center">
+                    <div class="glass-panel rounded-xl p-3">
+                        <i class="fas fa-cube text-amber-500 text-xl mb-2"></i>
+                        <p class="text-xs text-slate-300">3D Models</p>
+                    </div>
+                    <div class="glass-panel rounded-xl p-3">
+                        <i class="fas fa-expand text-amber-500 text-xl mb-2"></i>
+                        <p class="text-xs text-slate-300">Real Scale</p>
+                    </div>
+                    <div class="glass-panel rounded-xl p-3">
+                        <i class="fas fa-bolt text-amber-500 text-xl mb-2"></i>
+                        <p class="text-xs text-slate-300">Instant</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Menu Selection (Bottom Sheet) -->
+        <div id="menu-panel" class="absolute bottom-0 left-0 right-0 glass-panel rounded-t-3xl p-6 transform translate-y-full transition-transform duration-500 interactive z-40 max-h-[60vh] overflow-y-auto">
+            <div class="w-12 h-1 bg-slate-600 rounded-full mx-auto mb-6"></div>
+            
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold serif">Select Your Pizza</h2>
+                <button onclick="toggleMenu()" class="text-slate-400 hover:text-white">
+                    <i class="fas fa-chevron-down text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <!-- Margherita -->
+                <div class="pizza-card bg-slate-800 rounded-2xl p-4 border border-slate-700 active" onclick="selectPizza('margherita')" id="card-margherita">
+                    <div class="h-32 bg-gradient-to-br from-orange-900/50 to-red-900/50 rounded-xl flex items-center justify-center mb-3 relative overflow-hidden">
+                        <div class="absolute inset-0 opacity-30" style="background-image: radial-gradient(circle at 30% 30%, #f59e0b 2px, transparent 2px); background-size: 15px 15px;"></div>
+                        <i class="fas fa-pizza-slice text-5xl text-orange-400"></i>
+                    </div>
+                    <h3 class="font-bold text-lg mb-1">Margherita</h3>
+                    <p class="text-slate-400 text-sm mb-2">Fresh mozzarella, tomatoes, basil</p>
+                    <p class="text-amber-400 font-bold text-xl">$14</p>
+                </div>
+
+                <!-- Pepperoni -->
+                <div class="pizza-card bg-slate-800 rounded-2xl p-4 border border-slate-700" onclick="selectPizza('pepperoni')" id="card-pepperoni">
+                    <div class="h-32 bg-gradient-to-br from-red-900/50 to-red-800/50 rounded-xl flex items-center justify-center mb-3 relative overflow-hidden">
+                        <div class="absolute inset-0 opacity-20" style="background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,0,0,0.1) 10px, rgba(255,0,0,0.1) 20px);"></div>
+                        <i class="fas fa-pizza-slice text-5xl text-red-400"></i>
+                    </div>
+                    <h3 class="font-bold text-lg mb-1">Pepperoni</h3>
+                    <p class="text-slate-400 text-sm mb-2">Double pepperoni, extra cheese</p>
+                    <p class="text-amber-400 font-bold text-xl">$18</p>
+                </div>
+
+                <!-- Supreme -->
+                <div class="pizza-card bg-slate-800 rounded-2xl p-4 border border-slate-700" onclick="selectPizza('supreme')" id="card-supreme">
+                    <div class="h-32 bg-gradient-to-br from-yellow-900/50 to-orange-900/50 rounded-xl flex items-center justify-center mb-3">
+                        <i class="fas fa-pizza-slice text-5xl text-yellow-400"></i>
+                    </div>
+                    <h3 class="font-bold text-lg mb-1">Supreme</h3>
+                    <p class="text-slate-400 text-sm mb-2">Pepperoni, veggies, sausage</p>
+                    <p class="text-amber-400 font-bold text-xl">$22</p>
+                </div>
+            </div>
+            
+            <button onclick="placeOnTable()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 text-lg" id="place-btn">
+                <i class="fas fa-hand-pointer"></i>
+                Tap to Place on Table
+            </button>
+        </div>
+
+        <!-- AR Controls (Top Bar) -->
+        <div id="ar-controls" class="absolute top-0 left-0 right-0 p-4 flex justify-between items-start hidden interactive z-30">
+            <div class="glass-panel rounded-2xl p-3 flex items-center gap-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-600 rounded-full flex items-center justify-center">
+                    <i class="fas fa-utensils text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="text-xs text-slate-400">Now Viewing</p>
+                    <p class="font-bold text-sm" id="current-pizza-name">Margherita</p>
+                </div>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="resetPlacement()" class="glass-panel hover:bg-slate-700 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all" title="Reset">
+                    <i class="fas fa-undo"></i>
+                </button>
+                <button onclick="toggleMenu()" class="glass-panel hover:bg-slate-700 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all" title="Menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <button onclick="exitAR()" class="bg-red-500/80 hover:bg-red-600 text-white w-12 h-12 rounded-full flex items-center justify-center transition-all" title="Exit">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Surface Scanning Indicator -->
+        <div id="scanning-indicator" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none hidden z-20">
+            <div class="w-64 h-64 border-2 border-dashed border-amber-500/50 rounded-full flex items-center justify-center relative">
+                <div class="scanning-line absolute w-full"></div>
+                <div class="text-center">
+                    <div class="loader mx-auto mb-4"></div>
+                    <p class="text-white font-semibold text-lg">Scanning for surfaces...</p>
+                    <p class="text-slate-400 text-sm mt-2">Point camera at your table</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Instructions Toast -->
+        <div id="instructions" class="absolute top-24 left-1/2 transform -translate-x-1/2 glass-panel px-6 py-3 rounded-full hidden z-20">
+            <p class="text-sm font-medium text-white flex items-center gap-2">
+                <i class="fas fa-info-circle text-amber-500"></i>
+                <span id="instruction-text">Move camera slowly to detect table surface</span>
+            </p>
+        </div>
+
+        <!-- Order Button -->
+        <div id="order-panel" class="absolute bottom-6 left-0 right-0 px-6 hidden interactive z-30">
+            <div class="glass-panel rounded-2xl p-4 flex justify-between items-center max-w-md mx-auto">
+                <div>
+                    <p class="text-xs text-slate-400">Total</p>
+                    <p class="text-2xl font-bold text-amber-400" id="order-price">$14</p>
+                </div>
+                <button onclick="placeOrder()" class="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-bold transition-all flex items-center gap-2">
+                    <i class="fas fa-check"></i>
+                    Order Now
+                </button>
+            </div>
+        </div>
+
+        <!-- Order Success Modal -->
+        <div id="success-modal" class="absolute inset-0 bg-black/90 flex items-center justify-center hidden interactive z-50">
+            <div class="text-center max-w-sm px-6">
+                <div class="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+                    <i class="fas fa-check text-5xl text-green-500"></i>
+                </div>
+                <h2 class="text-3xl font-bold serif mb-4">Order Placed!</h2>
+                <p class="text-slate-400 mb-8">Your pizza will be prepared fresh and delivered to your table in 20 minutes.</p>
+                <button onclick="closeSuccess()" class="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold py-4 rounded-2xl transition-all">
+                    Continue Exploring
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Pizza configurations with 3D model data
+        const pizzas = {
+            margherita: {
+                name: "Margherita Classic",
+                price: "$14",
+                colors: {
+                    crust: 0x8B4513,
+                    cheese: 0xFFD700,
+                    sauce: 0xFF6347,
+                    topping: 0xFF0000
+                },
+                toppings: [
+                    { type: 'sphere', color: 0xFF0000, count: 8, radius: 0.08, y: 0.12 }, // Tomatoes
+                    { type: 'plane', color: 0x228B22, count: 5, size: 0.15, y: 0.13 }    // Basil
+                ]
+            },
+            pepperoni: {
+                name: "Pepperoni Feast",
+                price: "$18",
+                colors: {
+                    crust: 0x8B4513,
+                    cheese: 0xFFA500,
+                    sauce: 0xCC0000,
+                    topping: 0xAA0000
+                },
+                toppings: [
+                    { type: 'cylinder', color: 0xAA0000, count: 12, radius: 0.12, height: 0.02, y: 0.12 } // Pepperoni
+                ]
+            },
+            supreme: {
+                name: "Supreme Deluxe",
+                price: "$22",
+                colors: {
+                    crust: 0x8B4513,
+                    cheese: 0xFFDB58,
+                    sauce: 0xCC0000,
+                    topping: 0x333333
+                },
+                toppings: [
+                    { type: 'cylinder', color: 0x8B0000, count: 6, radius: 0.1, height: 0.02, y: 0.12 },   // Pepperoni
+                    { type: 'sphere', color: 0x8B4513, count: 4, radius: 0.06, y: 0.13 },                   // Sausage
+                    { type: 'cylinder', color: 0x228B22, count: 6, radius: 0.06, height: 0.08, y: 0.14 },  // Peppers
+                    { type: 'sphere', color: 0x000000, count: 6, radius: 0.04, y: 0.13 }                     // Olives
+                ]
+            }
+        };
+
+        let currentPizza = 'margherita';
+        let scene, camera, renderer, xrSession, xrReferenceSpace, xrHitTestSource;
+        let reticle, pizzaGroup, controller;
+        let hitTestResults = [];
+        let isPlaced = false;
+        let isMenuOpen = false;
+
+        // Initialize Three.js scene
+        function initThree() {
+            const canvas = document.getElementById('ar-canvas');
+            
+            scene = new THREE.Scene();
+            
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+            
+            renderer = new THREE.WebGLRenderer({ 
+                canvas: canvas, 
+                antialias: true, 
+                alpha: true,
+                preserveDrawingBuffer: true 
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.xr.enabled = true;
+            
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 2, 1);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            
+            const pointLight = new THREE.PointLight(0xffaa00, 0.5, 5);
+            pointLight.position.set(0, 2, 0);
+            scene.add(pointLight);
+            
+            // Create reticle
+            createReticle();
+            
+            // Create initial pizza
+            createPizza(currentPizza);
+            
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createReticle() {
+            const geometry = new THREE.RingGeometry(0.15, 0.2, 32);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: 0xf59e0b, 
+                transparent: true, 
+                opacity: 0.8,
+                side: THREE.DoubleSide
+            });
+            reticle = new THREE.Mesh(geometry, material);
+            reticle.rotation.x = -Math.PI / 2;
+            reticle.visible = false;
+            scene.add(reticle);
+            
+            // Add inner dot
+            const dotGeometry = new THREE.SphereGeometry(0.03, 16, 16);
+            const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+            const dot = new THREE.Mesh(dotGeometry, dotMaterial);
+            dot.position.y = 0.01;
+            reticle.add(dot);
+        }
+
+        function createPizza(type) {
+            if (pizzaGroup) scene.remove(pizzaGroup);
+            
+            const config = pizzas[type];
+            pizzaGroup = new THREE.Group();
+            
+            // Pizza base (crust)
+            const baseGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.05, 32);
+            const baseMaterial = new THREE.MeshStandardMaterial({ 
+                color: config.colors.crust,
+                roughness: 0.8 
+            });
+            const base = new THREE.Mesh(baseGeometry, baseMaterial);
+            base.position.y = 0.025;
+            base.castShadow = true;
+            base.receiveShadow = true;
+            pizzaGroup.add(base);
+            
+            // Outer crust ring
+            const crustGeometry = new THREE.TorusGeometry(0.38, 0.06, 16, 32);
+            const crustMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x654321,
+                roughness: 0.9 
+            });
+            const crust = new THREE.Mesh(crustGeometry, crustMaterial);
+            crust.rotation.x = -Math.PI / 2;
+            crust.position.y = 0.06;
+            crust.castShadow = true;
+            pizzaGroup.add(crust);
+            
+          
